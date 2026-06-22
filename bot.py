@@ -81,6 +81,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/analytics — Overall engagement totals\n"
         "/delete `<id>` — Remove a specific post\n"
         "/caption `<id> <new caption>` — Update caption of a post\n"
+        "/postnow `<id>` — Force a queued post to publish immediately\n"
         "/clear — Remove all pending posts\n"
         "/cancel — Cancel current action\n\n"
         "🌐 Open your Railway URL to see the dashboard.",
@@ -169,6 +170,28 @@ async def cmd_caption(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         db.update_caption(post_id, new_caption)
         await update.message.reply_text(f"📝 Caption for post #{post_id} updated successfully.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid ID.")
+
+
+async def cmd_postnow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not auth(update): return
+    if not ctx.args:
+        await update.message.reply_text("Usage: /postnow `<id>`", parse_mode="Markdown")
+        return
+    try:
+        post_id = int(ctx.args[0])
+        post = db.get_post(post_id)
+        if not post:
+            await update.message.reply_text("⚠️ Post not found.")
+            return
+        if post["status"] != "pending":
+            await update.message.reply_text("⚠️ This post is not pending (it may have already been posted or failed).")
+            return
+            
+        await update.message.reply_text(f"🚀 Forcing post #{post_id} to publish right now...")
+        from scheduler import _process_post
+        await _process_post(ctx.bot, post)
     except ValueError:
         await update.message.reply_text("⚠️ Invalid ID.")
 
@@ -614,6 +637,7 @@ def setup_bot() -> Application:
     app.add_handler(CommandHandler("analytics", cmd_analytics))
     app.add_handler(CommandHandler("delete",    cmd_delete))
     app.add_handler(CommandHandler("caption",   cmd_caption))
+    app.add_handler(CommandHandler("postnow",   cmd_postnow))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(bulk)
     app.add_handler(single)

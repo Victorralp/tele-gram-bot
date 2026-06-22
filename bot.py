@@ -361,6 +361,15 @@ async def recv_zip_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Please send a valid ZIP file.")
         return ConversationHandler.END
 
+    if doc.file_size and doc.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text(
+            "⚠️ *File is too big!*\n\n"
+            "Telegram strictly limits bots from downloading files larger than **20 MB**.\n"
+            "Please split your folder into smaller `.zip` files (under 20 MB each) and upload them one by one.",
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
     status_msg = await update.message.reply_text("📥 Downloading ZIP file...")
     
     temp_dir = Path(tempfile.mkdtemp())

@@ -185,8 +185,8 @@ async def cmd_postnow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not post:
             await update.message.reply_text("⚠️ Post not found.")
             return
-        if post["status"] != "pending":
-            await update.message.reply_text("⚠️ This post is not pending (it may have already been posted or failed).")
+        if post["status"] not in ["pending", "failed"]:
+            await update.message.reply_text("⚠️ This post has already been posted successfully.")
             return
             
         await update.message.reply_text(f"🚀 Forcing post #{post_id} to publish right now...")

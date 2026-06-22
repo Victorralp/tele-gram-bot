@@ -14,7 +14,7 @@ def _p(**extra) -> dict:
     return {"access_token": FB_ACCESS_TOKEN, **extra}
 
 
-def post_photo(image_path: str, caption: str) -> str | None:
+def post_photo(image_path: str, caption: str) -> tuple[str | None, str | None]:
     try:
         with open(image_path, "rb") as f:
             r = requests.post(
@@ -25,14 +25,17 @@ def post_photo(image_path: str, caption: str) -> str | None:
             )
         if r.ok:
             data = r.json()
-            return data.get("post_id") or data.get("id")
-        log.error(f"FB photo {r.status_code}: {r.text}")
+            return (data.get("post_id") or data.get("id"), None)
+        err = f"FB photo {r.status_code}: {r.text}"
+        log.error(err)
+        return (None, err)
     except Exception as e:
-        log.error(f"FB photo exception: {e}")
-    return None
+        err = f"FB photo exception: {e}"
+        log.error(err)
+        return (None, err)
 
 
-def post_video(video_path: str, description: str) -> str | None:
+def post_video(video_path: str, description: str) -> tuple[str | None, str | None]:
     try:
         with open(video_path, "rb") as f:
             r = requests.post(
@@ -42,14 +45,17 @@ def post_video(video_path: str, description: str) -> str | None:
                 timeout=180,
             )
         if r.ok:
-            return r.json().get("id")
-        log.error(f"FB video {r.status_code}: {r.text}")
+            return (r.json().get("id"), None)
+        err = f"FB video {r.status_code}: {r.text}"
+        log.error(err)
+        return (None, err)
     except Exception as e:
-        log.error(f"FB video exception: {e}")
-    return None
+        err = f"FB video exception: {e}"
+        log.error(err)
+        return (None, err)
 
 
-def post_text(message: str) -> str | None:
+def post_text(message: str) -> tuple[str | None, str | None]:
     try:
         r = requests.post(
             f"{BASE}/{FB_PAGE_ID}/feed",
@@ -57,11 +63,14 @@ def post_text(message: str) -> str | None:
             timeout=30,
         )
         if r.ok:
-            return r.json().get("id")
-        log.error(f"FB text {r.status_code}: {r.text}")
+            return (r.json().get("id"), None)
+        err = f"FB text {r.status_code}: {r.text}"
+        log.error(err)
+        return (None, err)
     except Exception as e:
-        log.error(f"FB text exception: {e}")
-    return None
+        err = f"FB text exception: {e}"
+        log.error(err)
+        return (None, err)
 
 
 def fetch_analytics(fb_post_id: str) -> dict:

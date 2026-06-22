@@ -56,24 +56,26 @@ async def _process_post(bot, post: dict):
     caption = post.get("caption") or ""
 
     fb_post_id = None
+    error_msg = None
     try:
         if kind == "photo":
             path = post.get("file_path", "")
             if not Path(path).exists():
+                error_msg = f"File missing: {path}"
                 log.error(f"File missing for post #{post_id}: {path}")
-                db.mark_failed(post_id)
-                return
-            fb_post_id = facebook.post_photo(path, caption)
+            else:
+                fb_post_id, error_msg = facebook.post_photo(path, caption)
         elif kind == "video":
             path = post.get("file_path", "")
             if not Path(path).exists():
+                error_msg = f"File missing: {path}"
                 log.error(f"File missing for post #{post_id}: {path}")
-                db.mark_failed(post_id)
-                return
-            fb_post_id = facebook.post_video(path, caption)
+            else:
+                fb_post_id, error_msg = facebook.post_video(path, caption)
         elif kind == "text":
-            fb_post_id = facebook.post_text(caption)
+            fb_post_id, error_msg = facebook.post_text(caption)
     except Exception as e:
+        error_msg = f"Exception: {e}"
         log.error(f"Post #{post_id} exception: {e}")
 
     if fb_post_id:
@@ -113,10 +115,11 @@ async def _process_post(bot, post: dict):
     else:
         db.mark_failed(post_id)
         log.warning(f"❌ Post #{post_id} failed")
+        err_str = f"\n\n*Error details:*\n`{error_msg}`" if error_msg else ""
         try:
             await bot.send_message(
                 chat_id    = ALLOWED_USER_ID,
-                text       = f"❌ *Post #{post_id} failed* to post to Facebook. Check logs.",
+                text       = f"❌ *Post #{post_id} failed* to post to Facebook.{err_str}",
                 parse_mode = "Markdown",
             )
         except Exception:

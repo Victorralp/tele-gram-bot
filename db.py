@@ -215,3 +215,15 @@ def get_chart_data(days: int = 30) -> list:
             ORDER BY date
         """, (f"-{days}",)).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_post(post_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM posts WHERE id=?", (post_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_caption(post_id: int, caption: str):
+    with get_db() as conn:
+        conn.execute("UPDATE posts SET caption=? WHERE id=?", (caption or "", post_id))
+

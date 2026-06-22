@@ -29,7 +29,7 @@ MEDIA_DIR = Path("media")
 MEDIA_DIR.mkdir(exist_ok=True)
 
 # ── Conversation states ────────────────────────────────────────────────────────
-WAIT_DATE, WAIT_RECURRING, WAIT_DAYS = 0, 1, 2
+WAIT_DATE, WAIT_RECURRING, WAIT_DAYS, WAIT_CAPTION = 0, 1, 2, 3
 BULK_COLLECT, BULK_START, BULK_INTERVAL = 10, 11, 12
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -77,6 +77,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/posted — Recent posts + analytics\n"
         "/analytics — Overall engagement totals\n"
         "/delete `<id>` — Remove a specific post\n"
+        "/caption `<id> <new caption>` — Update caption of a post\n"
         "/clear — Remove all pending posts\n"
         "/cancel — Cancel current action\n\n"
         "🌐 Open your Railway URL to see the dashboard.",
@@ -151,6 +152,24 @@ async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Invalid ID.")
 
 
+async def cmd_caption(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not auth(update): return
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text("Usage: /caption `<id>` `<new caption>`", parse_mode="Markdown")
+        return
+    try:
+        post_id = int(ctx.args[0])
+        new_caption = " ".join(ctx.args[1:])
+        post = db.get_post(post_id)
+        if not post:
+            await update.message.reply_text("⚠️ Post not found.")
+            return
+        db.update_caption(post_id, new_caption)
+        await update.message.reply_text(f"📝 Caption for post #{post_id} updated successfully.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid ID.")
+
+
 async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not auth(update): return
     pending = db.get_pending_posts()
@@ -184,10 +203,41 @@ async def recv_media(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     local = str(MEDIA_DIR / fname)
     await file.download_to_drive(local)
-    ctx.user_data["pending"] = {"type": kind, "file_path": local, "caption": msg.caption or ""}
+    
+    if msg.caption:
+        ctx.user_data["pending"] = {"type": kind, "file_path": local, "caption": msg.caption}
+        await msg.reply_text(
+            f"✅ Got your *{kind}* with caption!\n\n"
+            "📅 When to post? (e.g. `25 Jun 2025 09:00` or `now`)",
+            parse_mode="Markdown",
+        )
+        return WAIT_DATE
+    else:
+        ctx.user_data["pending"] = {"type": kind, "file_path": local, "caption": ""}
+        await msg.reply_text(
+            f"✅ Got your *{kind}*!\n\n"
+            "💬 Send the caption for this post now, or send /skip to continue without a caption.",
+            parse_mode="Markdown",
+        )
+        return WAIT_CAPTION
 
-    await msg.reply_text(
-        f"✅ Got your *{kind}*!\n\n"
+
+async def recv_caption(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not auth(update): return ConversationHandler.END
+    ctx.user_data["pending"]["caption"] = update.message.text
+    await update.message.reply_text(
+        "📝 Caption saved!\n\n"
+        "📅 When to post? (e.g. `25 Jun 2025 09:00` or `now`)",
+        parse_mode="Markdown",
+    )
+    return WAIT_DATE
+
+
+async def recv_caption_skip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not auth(update): return ConversationHandler.END
+    ctx.user_data["pending"]["caption"] = ""
+    await update.message.reply_text(
+        "👍 No caption added.\n\n"
         "📅 When to post? (e.g. `25 Jun 2025 09:00` or `now`)",
         parse_mode="Markdown",
     )
@@ -439,6 +489,10 @@ def setup_bot() -> Application:
             MessageHandler(filters.TEXT & ~filters.COMMAND, recv_text_post),
         ],
         states={
+            WAIT_CAPTION: [
+                CommandHandler("skip", recv_caption_skip),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, recv_caption),
+            ],
             WAIT_DATE:      [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_date)],
             WAIT_RECURRING: [CallbackQueryHandler(recv_recurring, pattern="^rec_")],
             WAIT_DAYS: [
@@ -468,6 +522,7 @@ def setup_bot() -> Application:
     app.add_handler(CommandHandler("posted",    cmd_posted))
     app.add_handler(CommandHandler("analytics", cmd_analytics))
     app.add_handler(CommandHandler("delete",    cmd_delete))
+    app.add_handler(CommandHandler("caption",   cmd_caption))
     app.add_handler(CommandHandler("clear",     cmd_clear))
     app.add_handler(bulk)
     app.add_handler(single)

@@ -9,7 +9,10 @@ Features:
 """
 import asyncio
 import logging
+import shutil
+import tempfile
 import uuid
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -351,6 +354,82 @@ async def _save_single_post(q_or_msg, ctx: ContextTypes.DEFAULT_TYPE):
         await q_or_msg.reply_text(txt, parse_mode="Markdown")
 
 
+async def recv_zip_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not auth(update): return ConversationHandler.END
+    doc = update.message.document
+    if not doc or not doc.file_name.lower().endswith(".zip"):
+        await update.message.reply_text("⚠️ Please send a valid ZIP file.")
+        return ConversationHandler.END
+
+    status_msg = await update.message.reply_text("📥 Downloading ZIP file...")
+    
+    temp_dir = Path(tempfile.mkdtemp())
+    try:
+        file = await doc.get_file()
+        zip_path = temp_dir / doc.file_name
+        await file.download_to_drive(str(zip_path))
+        
+        await status_msg.edit_text("📂 Unpacking ZIP file...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+            
+        media_extensions = {".jpg", ".jpeg", ".png", ".mp4", ".mov", ".avi"}
+        items = []
+        batch_id = str(uuid.uuid4())[:8]
+        
+        for p in temp_dir.rglob("*"):
+            if p.is_file() and p.suffix.lower() in media_extensions:
+                # Skip macOS metadata files
+                if p.name.startswith("._") or any(part.startswith("__") or part == "__MACOSX" for part in p.parts):
+                    continue
+                    
+                txt_path = p.with_suffix(".txt")
+                caption = ""
+                if txt_path.exists():
+                    try:
+                        caption = txt_path.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        try:
+                            caption = txt_path.read_text(encoding="latin-1").strip()
+                        except Exception:
+                            caption = ""
+                
+                fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{batch_id}_{len(items)}{p.suffix}"
+                dest = MEDIA_DIR / fname
+                shutil.copy2(p, dest)
+                
+                kind = "video" if p.suffix.lower() in {".mp4", ".mov", ".avi"} else "photo"
+                items.append({
+                    "type": kind,
+                    "file_path": str(dest),
+                    "caption": caption
+                })
+        
+        if not items:
+            await status_msg.edit_text("⚠️ No supported photos or videos found in the ZIP file.")
+            return ConversationHandler.END
+            
+        ctx.user_data["bulk"] = {
+            "items": items,
+            "batch_id": batch_id
+        }
+        
+        await status_msg.edit_text(
+            f"📦 Got *{len(items)} posts* from ZIP!\n\n"
+            "📅 When should the *first* post go out?\n"
+            "`25 Jun 2025 09:00` or `now`",
+            parse_mode="Markdown",
+        )
+        return BULK_START
+        
+    except Exception as e:
+        log.error(f"Error handling ZIP bulk: {e}")
+        await status_msg.edit_text(f"❌ Failed to process ZIP file: {e}")
+        return ConversationHandler.END
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 # ── Bulk upload flow ───────────────────────────────────────────────────────────
 
 async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -505,7 +584,10 @@ def setup_bot() -> Application:
 
     # Bulk upload conversation
     bulk = ConversationHandler(
-        entry_points=[CommandHandler("bulk", cmd_bulk)],
+        entry_points=[
+            CommandHandler("bulk", cmd_bulk),
+            MessageHandler(filters.Document.ZIP, recv_zip_bulk),
+        ],
         states={
             BULK_COLLECT:  [
                 MessageHandler(filters.PHOTO | filters.VIDEO, collect_bulk_item),

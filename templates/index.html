@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FB Auto-Poster Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg: #0b0b0f; --card: #13131a; --border: #1e1e2e; --accent: #6366f1; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; margin: 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .4px; }
+  .badge-photo    { background:#1e3553; color:#60a5fa; }
+  .badge-video    { background:#2d1f4e; color:#a78bfa; }
+  .badge-text     { background:#1a3028; color:#34d399; }
+  .badge-pending  { background:#26211a; color:#fbbf24; }
+  .badge-posted   { background:#162318; color:#4ade80; }
+  .badge-failed   { background:#2a1a1a; color:#f87171; }
+  .badge-daily    { background:#1e2a3a; color:#38bdf8; }
+  .badge-weekly   { background:#1e2a3a; color:#38bdf8; }
+  .stat-card { transition: transform .15s; }
+  .stat-card:hover { transform: translateY(-2px); }
+  #chart-area { position:relative; height: 220px; }
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #2a2a40; border-radius: 3px; }
+  .spinner { border: 3px solid #1e1e2e; border-top-color: var(--accent); border-radius: 50%; width:24px; height:24px; animation: spin .7s linear infinite; display:inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pill { background: #1a1a2e; border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; cursor:pointer; transition: background .2s; }
+  .pill:hover, .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toast { position:fixed; bottom:20px; right:20px; padding:12px 20px; background:#1e293b; border:1px solid #334155; border-radius:10px; font-size:13px; z-index:999; transition:opacity .3s; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ── TOP NAV ──────────────────────────────────────────────────────── -->
+<header class="border-b border-[#1e1e2e] px-6 py-4 flex items-center justify-between sticky top-0 z-10" style="background:#0b0b0f;">
+  <div class="flex items-center gap-3">
+    <div class="text-2xl">📱</div>
+    <div>
+      <h1 class="text-white font-bold text-lg leading-none">FB Auto-Poster</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Dashboard</p>
+    </div>
+  </div>
+  <div class="flex items-center gap-3">
+    <span id="last-refresh" class="text-xs text-gray-600"></span>
+    <button onclick="loadAll()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-1.5 rounded-lg transition flex items-center gap-2">
+      <span id="refresh-icon">🔄</span> Refresh
+    </button>
+  </div>
+</header>
+
+<main class="px-6 py-6 max-w-7xl mx-auto">
+
+  <!-- ── STAT CARDS ──────────────────────────────────────────────── -->
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6" id="stats-grid">
+    <div class="card p-4 col-span-2 md:col-span-3 lg:col-span-6 flex items-center justify-center h-20">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!-- ── ENGAGEMENT CHART ────────────────────────────────────────── -->
+  <div class="card p-5 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-semibold text-white flex items-center gap-2">📈 Engagement Over Time</h2>
+      <div class="flex gap-2">
+        <span class="pill active" onclick="setDays(this,7)"  >7d</span>
+        <span class="pill"        onclick="setDays(this,30)" >30d</span>
+        <span class="pill"        onclick="setDays(this,90)" >90d</span>
+      </div>
+    </div>
+    <div id="chart-area"><canvas id="chart"></canvas></div>
+    <p id="no-chart" class="text-center text-gray-600 text-sm hidden pt-4">No analytics data yet — posts need to be live first.</p>
+  </div>
+
+  <!-- ── QUEUE + POSTED ──────────────────────────────────────────── -->
+  <div class="grid md:grid-cols-2 gap-6">
+
+    <!-- Pending Queue -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">📅 Pending Queue</h2>
+        <span id="pending-count" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="pending-list" class="space-y-2 overflow-y-auto max-h-[480px] pr-1">
+        <div class="flex justify-center py-6"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Posted with analytics -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">✅ Recent Posts</h2>
+        <span id="posted-count" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="posted-list" class="space-y-2 overflow-y-auto max-h-[480px] pr-1">
+        <div class="flex justify-center py-6"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script>
+let chartInst = null;
+let chartDays = 7;
+
+/* ── Toast ─────────────────────────────────────────────── */
+function toast(msg, ms=2500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+/* ── Stats ─────────────────────────────────────────────── */
+async function loadStats() {
+  const s = await fetch('/api/stats').then(r=>r.json());
+  const cards = [
+    { label:'Total Posts',    val: s.total   || 0, icon:'📊', color:'text-white'  },
+    { label:'Pending',        val: s.pending  || 0, icon:'⏳', color:'text-yellow-400' },
+    { label:'Posted',         val: s.posted   || 0, icon:'✅', color:'text-green-400'  },
+    { label:'Total Likes',    val: fmt(s.total_likes    || 0), icon:'❤️', color:'text-red-400'    },
+    { label:'Total Comments', val: fmt(s.total_comments || 0), icon:'💬', color:'text-blue-400'   },
+    { label:'Total Shares',   val: fmt(s.total_shares   || 0), icon:'↗️', color:'text-purple-400' },
+  ];
+  document.getElementById('stats-grid').innerHTML = cards.map(c=>`
+    <div class="card p-4 stat-card">
+      <div class="text-gray-500 text-xs uppercase tracking-wide">${c.icon} ${c.label}</div>
+      <div class="text-2xl font-bold mt-1 ${c.color}">${c.val}</div>
+    </div>
+  `).join('');
+}
+
+/* ── Chart ─────────────────────────────────────────────── */
+async function loadChart() {
+  const data = await fetch(`/api/chart?days=${chartDays}`).then(r=>r.json());
+  const noData = document.getElementById('no-chart');
+  const chartArea = document.getElementById('chart-area');
+
+  if (!data.length) {
+    chartArea.classList.add('hidden');
+    noData.classList.remove('hidden');
+    return;
+  }
+  chartArea.classList.remove('hidden');
+  noData.classList.add('hidden');
+
+  const labels   = data.map(d => d.date);
+  const likes    = data.map(d => d.likes);
+  const comments = data.map(d => d.comments);
+  const shares   = data.map(d => d.shares);
+
+  const cfg = (label, data, color) => ({
+    label, data,
+    borderColor: color,
+    backgroundColor: color + '22',
+    borderWidth: 2,
+    tension: 0.4,
+    fill: true,
+    pointRadius: 3,
+    pointHoverRadius: 5,
+  });
+
+  if (chartInst) chartInst.destroy();
+  chartInst = new Chart(document.getElementById('chart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        cfg('❤️ Likes',    likes,    '#ef4444'),
+        cfg('💬 Comments', comments, '#3b82f6'),
+        cfg('↗️ Shares',   shares,   '#a855f7'),
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color:'#9ca3af', boxWidth:12, font:{size:12} } },
+        tooltip: { backgroundColor:'#1e1e2e', borderColor:'#2a2a40', borderWidth:1 }
+      },
+      scales: {
+        x: { ticks: { color:'#6b7280', font:{size:11} }, grid: { color:'#1a1a2a' } },
+        y: { ticks: { color:'#6b7280', font:{size:11} }, grid: { color:'#1a1a2a' }, beginAtZero:true }
+      }
+    }
+  });
+}
+
+function setDays(el, days) {
+  chartDays = days;
+  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  loadChart();
+}
+
+/* ── Posts ─────────────────────────────────────────────── */
+async function loadPosts() {
+  const posts   = await fetch('/api/posts').then(r=>r.json());
+  const pending = posts.filter(p=>p.status==='pending').sort((a,b)=>a.scheduled_at.localeCompare(b.scheduled_at));
+  const posted  = posts.filter(p=>p.status==='posted');
+  const failed  = posts.filter(p=>p.status==='failed');
+
+  document.getElementById('pending-count').textContent = `${pending.length} posts`;
+  document.getElementById('posted-count').textContent  = `${posted.length} posts`;
+
+  renderPending(pending, failed);
+  renderPosted(posted);
+}
+
+function renderPending(pending, failed) {
+  const el = document.getElementById('pending-list');
+  if (!pending.length && !failed.length) {
+    el.innerHTML = '<p class="text-gray-600 text-sm text-center py-6">Queue is empty.</p>';
+    return;
+  }
+  const allItems = [
+    ...failed.map(p=>({...p, _isFailed:true})),
+    ...pending,
+  ];
+  el.innerHTML = allItems.map(p => {
+    const dt  = fmtDt(p.scheduled_at);
+    const rec = p.recurring !== 'none'
+      ? `<span class="badge badge-${p.recurring} ml-1">🔁 ${p.recurring}</span>` : '';
+    const caption = p.caption ? p.caption.slice(0,50) + (p.caption.length>50?'…':'') : '<em class="text-gray-600">no caption</em>';
+    const statusBadge = p._isFailed
+      ? '<span class="badge badge-failed ml-1">Failed</span>'
+      : '<span class="badge badge-pending ml-1">Pending</span>';
+    return `
+      <div class="bg-[#0f0f18] border border-[#1e1e2e] rounded-xl p-3 flex gap-3 items-start">
+        <div class="flex-1 min-w-0">
+          <div class="flex flex-wrap items-center gap-1 mb-1">
+            <span class="badge badge-${p.type}">${p.type.toUpperCase()}</span>
+            ${statusBadge}${rec}
+          </div>
+          <div class="text-white text-sm font-medium">${dt}</div>
+          <div class="text-gray-500 text-xs mt-0.5 truncate">${caption}</div>
+        </div>
+        <button onclick="delPost(${p.id})" title="Delete" class="text-gray-700 hover:text-red-500 transition text-lg shrink-0 mt-0.5">🗑</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderPosted(posted) {
+  const el = document.getElementById('posted-list');
+  if (!posted.length) {
+    el.innerHTML = '<p class="text-gray-600 text-sm text-center py-6">Nothing posted yet.</p>';
+    return;
+  }
+  el.innerHTML = posted.map(p => {
+    const a   = p.analytics || {};
+    const dt  = fmtDt(p.posted_at);
+    const caption = p.caption ? p.caption.slice(0,50) + (p.caption.length>50?'…':'') : '<em class="text-gray-600">no caption</em>';
+    const hasA = a.likes_count !== undefined;
+    return `
+      <div class="bg-[#0f0f18] border border-[#1e1e2e] rounded-xl p-3">
+        <div class="flex flex-wrap items-center gap-1 mb-1">
+          <span class="badge badge-${p.type}">${p.type.toUpperCase()}</span>
+          <span class="badge badge-posted ml-1">Posted</span>
+          <span class="text-gray-600 text-xs ml-auto">${dt}</span>
+        </div>
+        <div class="text-gray-400 text-xs mt-0.5 truncate mb-2">${caption}</div>
+        ${hasA ? `
+        <div class="grid grid-cols-3 gap-2 mt-2">
+          ${analyticsCell('❤️','Likes',   a.likes_count   || 0, '#f87171')}
+          ${analyticsCell('💬','Comments',a.comments_count|| 0, '#60a5fa')}
+          ${analyticsCell('↗️','Shares',  a.shares_count  || 0, '#c084fc')}
+        </div>` : '<p class="text-gray-700 text-xs">Analytics loading…</p>'}
+      </div>
+    `;
+  }).join('');
+}
+
+function analyticsCell(icon, label, val, color) {
+  return `
+    <div class="bg-[#13131a] rounded-lg p-2 text-center">
+      <div class="text-xs" style="color:${color}">${icon} ${fmt(val)}</div>
+      <div class="text-gray-600 text-xs">${label}</div>
+    </div>
+  `;
+}
+
+/* ── Actions ────────────────────────────────────────────── */
+async function delPost(id) {
+  if (!confirm(`Delete post #${id}?`)) return;
+  await fetch(`/api/posts/${id}`, { method:'DELETE' });
+  toast(`🗑️ Post #${id} deleted`);
+  loadAll();
+}
+
+/* ── Utils ──────────────────────────────────────────────── */
+function fmt(n) { return Number(n).toLocaleString(); }
+
+function fmtDt(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'})
+    + ' ' + d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+/* ── Load all ───────────────────────────────────────────── */
+async function loadAll() {
+  document.getElementById('refresh-icon').textContent = '⏳';
+  await Promise.all([loadStats(), loadChart(), loadPosts()]);
+  document.getElementById('refresh-icon').textContent = '🔄';
+  document.getElementById('last-refresh').textContent =
+    'Updated ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+loadAll();
+setInterval(loadAll, 60_000);
+</script>
+</body>
+</html>

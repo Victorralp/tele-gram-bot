@@ -1,0 +1,5 @@
+.env
+posts.db
+media/
+__pycache__/
+*.pyc

@@ -408,34 +408,71 @@ async def recv_zip_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         media_extensions = {".jpg", ".jpeg", ".png", ".mp4", ".mov", ".avi"}
         items = []
         batch_id = str(uuid.uuid4())[:8]
-        
+
+        # Build index of all .txt caption files (keyed by stem, lowercased)
+        txt_files = {}
+        for t in temp_dir.rglob("*.txt"):
+            if t.name.startswith("._") or "__MACOSX" in str(t):
+                continue
+            txt_files[t.stem.lower()] = t
+
+        def _read_caption(txt_path):
+            try:
+                return txt_path.read_text(encoding="utf-8").strip()
+            except Exception:
+                try:
+                    return txt_path.read_text(encoding="latin-1").strip()
+                except Exception:
+                    return ""
+
+        def _find_caption(media_path):
+            stem = media_path.stem.lower()
+            # 1. Exact stem match (e.g. day_1.png -> day_1.txt)
+            if stem in txt_files:
+                return _read_caption(txt_files[stem])
+            # 2. Check if any txt stem is a prefix of the media stem
+            #    e.g. "day_1" matches "day_1_image_12345"
+            for txt_stem, txt_path in sorted(txt_files.items(), key=lambda x: -len(x[0])):
+                if stem.startswith(txt_stem):
+                    return _read_caption(txt_path)
+            # 3. Extract numbers and match (e.g. "day_1_image_123" -> num "1", "Day_1" -> num "1")
+            import re
+            media_nums = re.findall(r'(\d+)', stem)
+            if media_nums:
+                first_num = media_nums[0]
+                for txt_stem, txt_path in txt_files.items():
+                    txt_nums = re.findall(r'(\d+)', txt_stem)
+                    if txt_nums and txt_nums[0] == first_num:
+                        return _read_caption(txt_path)
+            return ""
+
         for p in temp_dir.rglob("*"):
             if p.is_file() and p.suffix.lower() in media_extensions:
                 # Skip macOS metadata files
                 if p.name.startswith("._") or any(part.startswith("__") or part == "__MACOSX" for part in p.parts):
                     continue
-                    
-                txt_path = p.with_suffix(".txt")
-                caption = ""
-                if txt_path.exists():
-                    try:
-                        caption = txt_path.read_text(encoding="utf-8").strip()
-                    except Exception:
-                        try:
-                            caption = txt_path.read_text(encoding="latin-1").strip()
-                        except Exception:
-                            caption = ""
+
+                caption = _find_caption(p)
                 
                 fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{batch_id}_{len(items)}{p.suffix}"
                 dest = MEDIA_DIR / fname
                 shutil.copy2(p, dest)
                 
+                # Extract first number from filename for sorting (e.g. day_1 -> 1)
+                import re as _re
+                sort_nums = _re.findall(r'(\d+)', p.stem)
+                sort_key = int(sort_nums[0]) if sort_nums else len(items)
+                
                 kind = "video" if p.suffix.lower() in {".mp4", ".mov", ".avi"} else "photo"
                 items.append({
                     "type": kind,
                     "file_path": str(dest),
-                    "caption": caption
+                    "caption": caption,
+                    "_sort": sort_key
                 })
+        
+        # Sort by day number so posts go out in the right order
+        items.sort(key=lambda x: x.pop("_sort", 0))
         
         if not items:
             await status_msg.edit_text("⚠️ No supported photos or videos found in the ZIP file.")

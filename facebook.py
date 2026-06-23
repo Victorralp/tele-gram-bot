@@ -7,7 +7,7 @@ import requests
 from config import FB_PAGE_ID, FB_ACCESS_TOKEN
 
 log = logging.getLogger(__name__)
-BASE = "https://graph.facebook.com/v19.0"
+BASE = "https://graph.facebook.com/v25.0"
 
 
 def _p(**extra) -> dict:
@@ -19,7 +19,7 @@ def post_photo(image_path: str, caption: str) -> tuple[str | None, str | None]:
         with open(image_path, "rb") as f:
             r = requests.post(
                 f"{BASE}/{FB_PAGE_ID}/photos",
-                data=_p(caption=caption),
+                data=_p(message=caption),
                 files={"source": f},
                 timeout=60,
             )
